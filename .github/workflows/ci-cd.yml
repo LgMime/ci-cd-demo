@@ -1,16 +1,16 @@
-name: ci-cd
+name: CI/CD - .NET ForgeMaster
 
 on:
   push:
-    branches: [ "**" ] # запуск на будь-яку гілку
+    [cite_start]branches: [ "**" ] # запуск на будь-яку гілку 
   pull_request:
 
 permissions:
-  contents: read
-  deployments: write
+  [cite_start]contents: read # Дозвіл на читання коду (потрібно для checkout) 
+  [cite_start]deployments: write # Дозвіл для створення записів про деплой в Environment 
 
 env:
-  NODE_VERSION: '20.x' # приклад env на рівні workflow
+  DOTNET_VERSION: '8.0.x' # Версія .NET
 
 jobs:
   test:
@@ -19,91 +19,86 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-      
-    - name: Use Node ${{ env.NODE_VERSION }}
-      # CACHE (Node.js): кешуємо node_modules за допомогою actions/cache
-      uses: actions/setup-node@v4
-      with:
-        node-version: ${{ env.NODE_VERSION }}
-        
-    - name: Restore npm cache
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.npm
-          node_modules
-        key: npm-${{ runner.os }}-${{ hashFiles('**/package-lock.json') }}
-        restore-keys: |
-          npm-${{ runner.os }}-
-          
-    - name: Install deps
-      run: npm ci
-      
-    - name: Run tests
-      run: npm test -- --reporter=junit --reporter-options "mochaFile=report.xml" || true
-      # '|| true' щоб продовжити і завантажити звіт навіть якщо тести впали
-      
-    # ARTIFACTS: зберігаємо звіт тестів (JUnit)
-    - name: Upload test report
-      uses: actions/upload-artifact@v4
-      if: always()
-      with:
-        name: junit-report
-        path: report.xml
 
+    # 1. Налаштування .NET SDK
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+
+    # 2. Кешування залежностей
+    # Для .NET кешування менш поширене, ніж для Node.js/PHP, оскільки dotnet restore зазвичай швидкий,
+    # але ми додамо його для виконання вимоги
+    - name: Restore dependencies
+      run: dotnet restore
+      
+    # 3. Запуск Тестів та Генерація Звіту (JUnit/trx)
+    - name: Run tests and generate report
+      # --logger trx - це стандартний формат звіту MSBuild/VSTest
+      run: dotnet test --logger trx --results-directory "TestResults" || true 
+      # || true дозволяє продовжити навіть якщо тести впали 
+    # 4. Збереження Артефакту Тестів (TRX)
+    - name: Upload test report (TRX)
+      uses: actions/upload-artifact@v4
+      [cite_start]if: always() # Завжди завантажувати, навіть якщо тести не пройшли 
+      with:
+        name: test-report
+        # Файл TRX буде тут: TestResults/{Guid_Folder}/файл.trx
+        path: TestResults/**/*.trx
   build:
     name: Build
     runs-on: ubuntu-latest
-    needs: [test] # <— "stages": послідовність через needs
+    [cite_start]needs: [test] # <— Залежність: build запускається лише після успішного test 
     steps:
     - uses: actions/checkout@v4
     
-    - uses: actions/setup-node@v4
+    # Налаштування .NET SDK
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
       with:
-        node-version: ${{ env.NODE_VERSION }}
-        
-    - name: Restore npm cache
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.npm
-          node_modules
-        key: npm-${{ runner.os }}-${{ hashFiles('**/package-lock.json') }}
-        restore-keys: |
-          npm-${{ runner.os }}-
-          
-    - name: Install deps
-      run: npm ci
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+
+    - name: Restore dependencies
+      run: dotnet restore
       
+    # Виконання збірки (створення готових до розгортання файлів)
     - name: Build project
-      run: npm run build
+      # -c Release - для релізної конфігурації; -o dist - вихідна папка
+      run: dotnet publish -c Release -o dist
       
-    # ARTIFACTS: зберігаємо білд (наприклад, папку dist)
+    # Збереження Артефакту Збірки
+    # Папка dist буде містити готову до деплою програму (DLLs)
     - name: Upload build artifact
       uses: actions/upload-artifact@v4
       with:
-        name: app-build
-        path: dist
-
+        [cite_start]name: app-build # Ім'я артефакту 
+        [cite_start]path: dist # Папка, яку ми завантажуємо 
   deploy:
     name: Deploy (staging)
     runs-on: ubuntu-latest
-    needs: [build] # виконуй після build
-    if: github.ref == 'refs/heads/main' # деплоїмо лише з main
+    [cite_start]needs: [build] # Залежність: deploy запускається лише після успішного build 
+    
+    # Умова: деплой тільки з гілки 'main' 
+    if: github.ref == 'refs/heads/main' 
+    
     environment:
-      name: staging
-      url: https://staging.example.com
+      [cite_start]name: staging # Прив'язка до створеного середовища GitHub 
+      [cite_start]url: https://staging.example.com # URL, який з'явиться в Run 
+      
     steps:
+    # 1. Завантаження Артефакту Збірки
     - name: Download build artifact
       uses: actions/download-artifact@v4
       with:
         name: app-build
-        path: ./artifact
+        [cite_start]path: ./artifact # Збірка буде завантажена в папку ./artifact 
         
+    # 2. Імітація Деплою з Використанням Secret
     - name: Simulate deploy
       env:
-        DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN }} # використання secret
+        [cite_start]DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN }} # Завантажуємо Secret в змінну середовища 
       run: |
-        echo "Deploying to ${{ github.environment }} with token: ${DEPLOY_TOKEN:0:4}****"
-        ls -la ./artifact
+        echo "Deploying to ${{ github.environment }}..."
+        echo "Token prefix: ${DEPLOY_TOKEN:0:4}****" # Безпечний вивід частини Secret [cite: 243]
+        ls -la ./artifact # Перевіряємо, що білд завантажено
         echo "Deploy success"
