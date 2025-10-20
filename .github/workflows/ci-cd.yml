@@ -2,15 +2,15 @@ name: CI/CD - .NET ForgeMaster
 
 on:
   push:
-    [cite_start]branches: [ "**" ] # запуск на будь-яку гілку 
+    branches: [ "**" ]
   pull_request:
 
 permissions:
-  [cite_start]contents: read # Дозвіл на читання коду (потрібно для checkout) 
-  [cite_start]deployments: write # Дозвіл для створення записів про деплой в Environment 
+  contents: read
+  deployments: write
 
 env:
-  DOTNET_VERSION: '8.0.x' # Версія .NET
+  DOTNET_VERSION: '8.0.x'
 
 jobs:
   test:
@@ -20,39 +20,31 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    # 1. Налаштування .NET SDK
     - name: Setup .NET
       uses: actions/setup-dotnet@v4
       with:
         dotnet-version: ${{ env.DOTNET_VERSION }}
 
-    # 2. Кешування залежностей
-    # Для .NET кешування менш поширене, ніж для Node.js/PHP, оскільки dotnet restore зазвичай швидкий,
-    # але ми додамо його для виконання вимоги
     - name: Restore dependencies
       run: dotnet restore
       
-    # 3. Запуск Тестів та Генерація Звіту (JUnit/trx)
     - name: Run tests and generate report
-      # --logger trx - це стандартний формат звіту MSBuild/VSTest
       run: dotnet test --logger trx --results-directory "TestResults" || true 
-      # || true дозволяє продовжити навіть якщо тести впали 
-    # 4. Збереження Артефакту Тестів (TRX)
+
     - name: Upload test report (TRX)
       uses: actions/upload-artifact@v4
-      [cite_start]if: always() # Завжди завантажувати, навіть якщо тести не пройшли 
+      if: always()
       with:
         name: test-report
-        # Файл TRX буде тут: TestResults/{Guid_Folder}/файл.trx
         path: TestResults/**/*.trx
+
   build:
     name: Build
     runs-on: ubuntu-latest
-    [cite_start]needs: [test] # <— Залежність: build запускається лише після успішного test 
+    needs: [test]
     steps:
     - uses: actions/checkout@v4
     
-    # Налаштування .NET SDK
     - name: Setup .NET
       uses: actions/setup-dotnet@v4
       with:
@@ -61,44 +53,34 @@ jobs:
     - name: Restore dependencies
       run: dotnet restore
       
-    # Виконання збірки (створення готових до розгортання файлів)
     - name: Build project
-      # -c Release - для релізної конфігурації; -o dist - вихідна папка
       run: dotnet publish -c Release -o dist
       
-    # Збереження Артефакту Збірки
-    # Папка dist буде містити готову до деплою програму (DLLs)
     - name: Upload build artifact
       uses: actions/upload-artifact@v4
       with:
-        [cite_start]name: app-build # Ім'я артефакту 
-        [cite_start]path: dist # Папка, яку ми завантажуємо 
+        name: app-build
+        path: dist
+
   deploy:
     name: Deploy (staging)
     runs-on: ubuntu-latest
-    [cite_start]needs: [build] # Залежність: deploy запускається лише після успішного build 
-    
-    # Умова: деплой тільки з гілки 'main' 
-    if: github.ref == 'refs/heads/main' 
-    
+    needs: [build]
+    if: github.ref == 'refs/heads/main'
     environment:
-      [cite_start]name: staging # Прив'язка до створеного середовища GitHub 
-      [cite_start]url: https://staging.example.com # URL, який з'явиться в Run 
-      
+      name: staging
+      url: https://staging.example.com
     steps:
-    # 1. Завантаження Артефакту Збірки
     - name: Download build artifact
       uses: actions/download-artifact@v4
       with:
         name: app-build
-        [cite_start]path: ./artifact # Збірка буде завантажена в папку ./artifact 
+        path: ./artifact
         
-    # 2. Імітація Деплою з Використанням Secret
     - name: Simulate deploy
       env:
-        [cite_start]DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN }} # Завантажуємо Secret в змінну середовища 
+        DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
       run: |
-        echo "Deploying to ${{ github.environment }}..."
-        echo "Token prefix: ${DEPLOY_TOKEN:0:4}****" # Безпечний вивід частини Secret [cite: 243]
-        ls -la ./artifact # Перевіряємо, що білд завантажено
+        echo "Deploying to ${{ github.environment }} with token prefix: ${DEPLOY_TOKEN:0:4}****"
+        ls -la ./artifact
         echo "Deploy success"
